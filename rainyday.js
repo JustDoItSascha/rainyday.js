@@ -7,7 +7,7 @@
 function RainyDay(options, canvas) {
 
 	if (this === window) { //if *this* is the window object, start over with a *new* object
-		return new RainyDay(options, canvas);
+		return new RainyDay(options);
 	}
 
 	this.img = options.image;
@@ -30,7 +30,8 @@ function RainyDay(options, canvas) {
 		height: this.img.clientHeight,
 		position: 'absolute',
 		top: 0,
-		left: 0
+		left: 0,
+		maxDrops: 0
 	};
 
 	// add the defaults to options
@@ -45,7 +46,7 @@ function RainyDay(options, canvas) {
 
 	// prepare canvas elements
 	this.canvas = canvas || this.prepareCanvas();
-	this.prepareBackground();
+	this.prepareBackground(this.canvas.width, this.canvas.height);
 	this.prepareGlass();
 
 	// assume defaults
@@ -56,7 +57,17 @@ function RainyDay(options, canvas) {
 
 	// set polyfill of requestAnimationFrame
 	this.setRequestAnimFrame();
+
+	this.pausing = false;
 }
+
+
+/**
+ * Pauses the engine
+ */
+RainyDay.prototype.stop = function () {
+	return this.pausing = true;
+};
 
 /**
  * Create the main canvas over a given element
@@ -70,7 +81,7 @@ RainyDay.prototype.prepareCanvas = function() {
 	canvas.width = this.options.width;
 	canvas.height = this.options.height;
 	this.options.parentElement.appendChild(canvas);
-	if (this.options.enableSizeChange) {
+	if (this.enableSizeChange) {
 		this.setResizeHandler();
 	}
 	return canvas;
@@ -100,9 +111,9 @@ RainyDay.prototype.checkSize = function() {
 	var canvasOffsetTop = this.canvas.offsetTop;
 
 	if (canvasWidth !== clientWidth || canvasHeight !== clientHeight) {
-		this.canvas.width = clientWidth;
-		this.canvas.height = clientHeight;
-		this.prepareBackground();
+		this.canvas.width = this.canvas.width;
+		this.canvas.height = this.canvas.height;
+		this.prepareBackground(this.canvas.width, this.canvas.height);
 		this.glass.width = this.canvas.width;
 		this.glass.height = this.canvas.height;
 		this.prepareReflections();
@@ -129,7 +140,9 @@ RainyDay.prototype.animateDrops = function() {
 		}
 	}
 	this.drops = newDrops;
-	window.requestAnimFrame(this.animateDrops.bind(this));
+	if (!this.pausing) {
+		window.requestAnimFrame(this.animateDrops.bind(this));
+	}
 };
 
 /**
@@ -155,6 +168,11 @@ RainyDay.prototype.prepareReflections = function() {
 	this.reflected.width = this.canvas.width / this.options.reflectionScaledownFactor;
 	this.reflected.height = this.canvas.height / this.options.reflectionScaledownFactor;
 	var ctx = this.reflected.getContext('2d');
+
+	// ctx.rotate(180 * Math.PI / 180);
+	// ctx.translate(-this.reflected.width,-this.reflected.height);
+	ctx.translate(0, this.reflected.height);
+	ctx.scale(1, -1);
 	ctx.drawImage(this.img, this.options.crop[0], this.options.crop[1], this.options.crop[2], this.options.crop[3], 0, 0, this.reflected.width, this.reflected.height);
 };
 
@@ -179,12 +197,13 @@ RainyDay.prototype.rain = function(presets, speed) {
 		this.prepareReflections();
 	}
 
+	this.pausing = false;
 	this.animateDrops();
 
 	// animation
 	this.presets = presets;
 
-	this.PRIVATE_GRAVITY_FORCE_FACTOR_Y = (this.options.fps * 0.001) / 25;
+	this.PRIVATE_GRAVITY_FORCE_FACTOR_Y = (this.options.fps * 0.002) / 25;
 	this.PRIVATE_GRAVITY_FORCE_FACTOR_X = ((Math.PI / 2) - this.options.gravityAngle) * (this.options.fps * 0.001) / 50;
 
 	// prepare gravity matrix
@@ -223,7 +242,7 @@ RainyDay.prototype.rain = function(presets, speed) {
 		lastExecutionTime = timestamp;
 		var context = this.canvas.getContext('2d');
 		context.clearRect(0, 0, this.canvas.width, this.canvas.height);
-		context.drawImage(this.background, 0, 0, this.canvas.width, this.canvas.height);
+		//context.drawImage(this.background, 0, 0, this.canvas.width, this.canvas.height);
 		// select matching preset
 		var preset;
 		for (var i = 0; i < presets.length; i++) {
@@ -243,7 +262,7 @@ RainyDay.prototype.rain = function(presets, speed) {
 			this.putDrop(new Drop(this, Math.random() * this.canvas.width, Math.random() * this.canvas.height, preset[0], preset[1]));
 		}
 		context.save();
-		context.globalAlpha = this.options.opacity;
+		context.globalAlpha = this.opacity;
 		context.drawImage(this.glass, 0, 0, this.canvas.width, this.canvas.height);
 		context.restore();
 	}
@@ -255,6 +274,10 @@ RainyDay.prototype.rain = function(presets, speed) {
  * @param drop drop object to be added to the animation
  */
 RainyDay.prototype.putDrop = function(drop) {
+	// Custom
+	if (this.options.maxDrops && this.drops.length >= this.options.maxDrops) {
+		return null;
+	}
 	drop.draw();
 	if (this.gravity && drop.r > this.options.gravityThreshold) {
 		if (this.options.enableCollisions) {
@@ -350,7 +373,7 @@ Drop.prototype.clear = function(force) {
 		this.terminate = true;
 		return true;
 	}
-	if ((this.y - this.r > this.rainyday.canvas.height) || (this.x - this.r > this.rainyday.canvas.width) || (this.x + this.r < 0)) {
+	if ((this.y - this.r > this.rainyday.h) || (this.x - this.r > this.rainyday.w) || (this.x + this.r < 0)) {
 		// over edge so stop this drop
 		return true;
 	}
@@ -548,16 +571,9 @@ RainyDay.prototype.COLLISION_SIMPLE = function(drop, collisions) {
 	var drop2;
 	while (item != null) {
 		var p = item.drop;
-		var radiusSum = drop.r + p.r;
-		var dx = drop.x - p.x;
-		var dy = drop.y - p.y;
-		if(Math.abs(dx) < radiusSum) {
-			if(Math.abs(dy) < radiusSum) {
-				if (Math.sqrt(Math.pow(drop.x - p.x, 2) + Math.pow(drop.y - p.y, 2)) < (drop.r + p.r)) {
-					drop2 = p;
-					break;
-				}
-			}
+		if (Math.sqrt(Math.pow(drop.x - p.x, 2) + Math.pow(drop.y - p.y, 2)) < (drop.r + p.r)) {
+			drop2 = p;
+			break;
 		}
 		item = item.next;
 	}
