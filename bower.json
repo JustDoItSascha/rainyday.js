@@ -4,7 +4,7 @@
     "main": "./dist/rainyday.min.js",
     "repository": {
         "type": "git",
-        "url": "git://github.com/maroslaw/rainyday.js.git"
+        "url": "git://github.com/justdoitsascha/rainyday.js.git"
     },
     "dependencies": {
     }
